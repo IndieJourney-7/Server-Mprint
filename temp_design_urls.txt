@@ -1,0 +1,27 @@
+    public function getFrontOriginalUrlAttribute()
+    {
+        if (!$this->front_original_path) return null;
+        // Use API route for CORS support
+        return url('/api/storage/' . $this->front_original_path);
+    }
+
+    public function getFrontThumbnailUrlAttribute()
+    {
+        if (!$this->front_thumbnail_path) return null;
+        // Use API route for CORS support
+        return url('/api/storage/' . $this->front_thumbnail_path);
+    }
+
+    public function getBackOriginalUrlAttribute()
+    {
+        if (!$this->back_original_path) return null;
+        // Use API route for CORS support
+        return url('/api/storage/' . $this->back_original_path);
+    }
+
+    public function getBackThumbnailUrlAttribute()
+    {
+        if (!$this->back_thumbnail_path) return null;
+        // Use API route for CORS support
+        return url('/api/storage/' . $this->back_thumbnail_path);
+    }

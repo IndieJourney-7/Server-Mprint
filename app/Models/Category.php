@@ -16,9 +16,15 @@ class Category extends Model
         'description',
         'image',
         'icon',
+        'banner_image',
         'sort_order',
         'is_active',
         'is_featured'
+    ];
+
+    protected $appends = [
+        'image_url',
+        'banner_image_url'
     ];
 
     protected $casts = [
@@ -30,6 +36,11 @@ class Category extends Model
     public function products()
     {
         return $this->hasMany(Product::class);
+    }
+
+    public function subcategories()
+    {
+        return $this->hasMany(Subcategory::class);
     }
 
     // Scopes
@@ -52,5 +63,13 @@ class Category extends Model
     public function getImageUrlAttribute()
     {
         return $this->image ? asset('storage/' . $this->image) : null;
+    }
+
+    /**
+     * Get the banner image URL for category pages
+     */
+    public function getBannerImageUrlAttribute()
+    {
+        return $this->banner_image ? asset('storage/' . $this->banner_image) : null;
     }
 }

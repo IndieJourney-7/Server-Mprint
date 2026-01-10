@@ -54,18 +54,24 @@ class CategoryController extends Controller
             'name' => 'required|string|max:255',
             'path' => 'required|string|max:255',
             'description' => 'nullable|string',
-            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:40960',
+            'banner_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:40960',
             'sort_order' => 'nullable|integer',
             'is_active' => 'nullable|boolean',
             'is_featured' => 'nullable|boolean'
         ]);
 
-        $categoryData = $request->except(['image']);
+        $categoryData = $request->except(['image', 'banner_image']);
         $categoryData['slug'] = Str::slug($request->name);
 
         if ($request->hasFile('image')) {
             $imagePath = $request->file('image')->store('categories', 'public');
             $categoryData['image'] = $imagePath;
+        }
+
+        if ($request->hasFile('banner_image')) {
+            $bannerPath = $request->file('banner_image')->store('categories/banners', 'public');
+            $categoryData['banner_image'] = $bannerPath;
         }
 
         $category = Category::create($categoryData);
@@ -85,13 +91,14 @@ class CategoryController extends Controller
             'name' => 'required|string|max:255',
             'path' => 'required|string|max:255',
             'description' => 'nullable|string',
-            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:40960',
+            'banner_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:40960',
             'sort_order' => 'nullable|integer',
             'is_active' => 'nullable|boolean',
             'is_featured' => 'nullable|boolean'
         ]);
 
-        $categoryData = $request->except(['image']);
+        $categoryData = $request->except(['image', 'banner_image']);
         $categoryData['slug'] = Str::slug($request->name);
 
         if ($request->hasFile('image')) {
@@ -99,16 +106,26 @@ class CategoryController extends Controller
             if ($category->image) {
                 Storage::disk('public')->delete($category->image);
             }
-            
+
             $imagePath = $request->file('image')->store('categories', 'public');
             $categoryData['image'] = $imagePath;
+        }
+
+        if ($request->hasFile('banner_image')) {
+            // Delete old banner image
+            if ($category->banner_image) {
+                Storage::disk('public')->delete($category->banner_image);
+            }
+
+            $bannerPath = $request->file('banner_image')->store('categories/banners', 'public');
+            $categoryData['banner_image'] = $bannerPath;
         }
 
         $category->update($categoryData);
 
         return response()->json([
             'success' => true,
-            'data' => $category,
+            'data' => $category->fresh(),
             'message' => 'Category updated successfully'
         ]);
     }
@@ -116,11 +133,15 @@ class CategoryController extends Controller
     public function destroy($id): JsonResponse
     {
         $category = Category::findOrFail($id);
-        
+
         if ($category->image) {
             Storage::disk('public')->delete($category->image);
         }
-        
+
+        if ($category->banner_image) {
+            Storage::disk('public')->delete($category->banner_image);
+        }
+
         $category->delete();
 
         return response()->json([

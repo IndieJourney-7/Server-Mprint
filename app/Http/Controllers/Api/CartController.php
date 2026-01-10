@@ -30,7 +30,7 @@ class CartController extends Controller
         try {
             $userId = auth()->id();
 
-            $items = Cart::with(['product.category','product.images'])
+            $items = Cart::with(['product.category','product.images', 'design'])
                 ->where('user_id', $userId)
                 ->orderByDesc('id')
                 ->get()
@@ -45,11 +45,17 @@ class CartController extends Controller
                     'price' => $item->product->price,
                     'featured_image_url' => $item->product->featured_image_url ?? '/placeholder.png',
                     'category' => optional($item->product->category)->name ?? 'No Category',
+                    'attributes' => $item->product->attributes ?? [],
                 ],
                 'quantity' => $item->quantity,
                 'selected_attributes' => $item->selected_attributes ?? [],
+                // Design info for displaying user's custom designs
+                'design_id' => $item->design_id,
                 'front_design_url' => $item->front_design_url,
                 'back_design_url' => $item->back_design_url,
+                // Include original high-res URLs if design exists
+                'front_original_url' => $item->design?->front_original_url,
+                'back_original_url' => $item->design?->back_original_url,
                 'unit_price' => $item->unit_price,
                 'total_price' => $item->total_price,
             ]);
@@ -72,7 +78,8 @@ class CartController extends Controller
         $validator = Validator::make($request->all(), [
             'product_id' => 'required|exists:products,id',
             'quantity' => 'required|integer|min:1',
-            'selected_attributes' => 'nullable|array'
+            'selected_attributes' => 'nullable|array',
+            'design_id' => 'nullable|exists:user_designs,id'
         ]);
         if ($validator->fails()) {
             return response()->json(['success' => false, 'message' => 'Validation failed', 'errors' => $validator->errors()], 422);
@@ -86,6 +93,17 @@ class CartController extends Controller
             $qty = (int) $request->quantity;
             $attrs = $this->normalizeAttributes($request->input('selected_attributes', []));
             $attrsJson = json_encode($attrs);
+            $designId = $request->input('design_id');
+
+            // If design_id is provided, check that it belongs to the user
+            if ($designId) {
+                $design = \App\Models\UserDesign::where('id', $designId)
+                    ->where('user_id', $userId)
+                    ->first();
+                if (!$design) {
+                    $designId = null; // Invalid design, ignore it
+                }
+            }
 
             $existing = Cart::where('user_id', $userId)
                 ->where('product_id', $request->product_id)
@@ -93,10 +111,14 @@ class CartController extends Controller
                 ->first();
 
             if ($existing) {
-                DB::transaction(function () use ($existing, $qty, $unitPrice) {
+                DB::transaction(function () use ($existing, $qty, $unitPrice, $designId) {
                     $existing->quantity += $qty;
                     $existing->unit_price = $unitPrice;
                     $existing->total_price = $existing->unit_price * $existing->quantity;
+                    // Update design_id if provided
+                    if ($designId) {
+                        $existing->design_id = $designId;
+                    }
                     $existing->save();
                 });
                 return response()->json(['success' => true, 'message' => 'Cart updated', 'data' => $existing]);
@@ -106,6 +128,7 @@ class CartController extends Controller
                 'user_id' => $userId,
                 'session_id' => null,
                 'product_id' => $request->product_id,
+                'design_id' => $designId,
                 'quantity' => $qty,
                 'selected_attributes' => $attrs,
                 'unit_price' => $unitPrice,
@@ -122,20 +145,87 @@ class CartController extends Controller
     // PUT /api/cart/update/{id} (auth required)
     public function updateQuantity(Request $request, $cartId)
     {
-        $validator = Validator::make(['quantity' => $request->quantity], [
-            'quantity' => 'required|integer|min:1'
+        $validator = Validator::make($request->all(), [
+            'quantity' => 'required|integer|min:1',
+            'selected_attributes' => 'nullable|array'
         ]);
         if ($validator->fails()) {
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
 
-        $userId = auth()->id();
-        $cart = Cart::where('user_id', $userId)->findOrFail($cartId);
-        $cart->quantity = (int) $request->quantity;
-        $cart->total_price = $cart->unit_price * $cart->quantity;
-        $cart->save();
+        try {
+            $userId = auth()->id();
+            $cart = Cart::with('product')->where('user_id', $userId)->findOrFail($cartId);
+            
+            $newQuantity = (int) $request->quantity;
+            
+            // Update quantity
+            $cart->quantity = $newQuantity;
+            
+            // Update selected_attributes if provided
+            if ($request->has('selected_attributes')) {
+                $attrs = $this->normalizeAttributes($request->input('selected_attributes', []));
+                $cart->selected_attributes = $attrs;
+            }
+            
+            // Recalculate pricing based on product's pricing tiers if available
+            $unitPrice = $cart->unit_price; // Default to existing unit price
+            
+            if ($cart->product && $cart->product->attributes) {
+                $productAttrs = $cart->product->attributes;
+                // Handle string or array
+                if (is_string($productAttrs)) {
+                    $productAttrs = json_decode($productAttrs, true) ?? [];
+                }
+                if (!is_array($productAttrs)) {
+                    $productAttrs = [];
+                }
+                    
+                // Look for pricing_tiers in product attributes
+                $pricingTiers = null;
+                foreach ($productAttrs as $key => $value) {
+                    $normalizedKey = strtolower(str_replace(['_', ' '], '', $key));
+                    if ($normalizedKey === 'pricingtiers' && is_array($value)) {
+                        $pricingTiers = $value;
+                        break;
+                    }
+                }
+                
+                if ($pricingTiers) {
+                    // Find the matching tier for the quantity
+                    foreach ($pricingTiers as $tier) {
+                        if (isset($tier['quantity']) && (int)$tier['quantity'] === $newQuantity) {
+                            $unitPrice = isset($tier['unit_price']) ? (float)$tier['unit_price'] : $unitPrice;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            $cart->unit_price = $unitPrice;
+            $cart->total_price = $unitPrice * $newQuantity;
+            $cart->save();
+            
+            // Reload with relationships for response
+            $cart->load('product');
 
-        return response()->json(['success' => true, 'data' => $cart]);
+            Log::info('Cart item updated', [
+                'cart_id' => $cartId,
+                'quantity' => $newQuantity,
+                'unit_price' => $unitPrice,
+                'total_price' => $cart->total_price,
+                'selected_attributes' => $cart->selected_attributes
+            ]);
+
+            return response()->json([
+                'success' => true, 
+                'message' => 'Cart updated successfully',
+                'data' => $cart
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Cart#update failed', ['e' => $e->getMessage(), 'cartId' => $cartId]);
+            return response()->json(['success' => false, 'message' => 'Failed to update cart'], 500);
+        }
     }
 
     // DELETE /api/cart/remove/{id} (auth required)

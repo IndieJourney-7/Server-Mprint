@@ -15,6 +15,7 @@ class Cart extends Model
         'user_id',
         'session_id',
         'product_id',
+        'design_id',
         'quantity',
         'selected_attributes',
         'front_design_path',
@@ -37,13 +38,37 @@ class Cart extends Model
         return $this->belongsTo(\App\Models\Product::class);
     }
 
+    public function design()
+    {
+        return $this->belongsTo(\App\Models\UserDesign::class, 'design_id');
+    }
+
+    public function user()
+    {
+        return $this->belongsTo(\App\Models\User::class);
+    }
+
     public function getFrontDesignUrlAttribute()
     {
+        // First check if there's a linked design
+        if ($this->design_id && $this->design) {
+            // Use original URL which contains the complete card preview (with white margins)
+            // NOT thumbnail_url which is cropped to 400x250
+            return $this->design->front_original_url;
+        }
+        // Fallback to direct path
         return $this->front_design_path ? asset('storage/' . $this->front_design_path) : null;
     }
 
     public function getBackDesignUrlAttribute()
     {
+        // First check if there's a linked design
+        if ($this->design_id && $this->design) {
+            // Use original URL which contains the complete card preview (with white margins)
+            // NOT thumbnail_url which is cropped to 400x250
+            return $this->design->back_original_url;
+        }
+        // Fallback to direct path
         return $this->back_design_path ? asset('storage/' . $this->back_design_path) : null;
     }
 }

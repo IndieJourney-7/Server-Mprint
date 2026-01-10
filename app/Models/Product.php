@@ -11,10 +11,12 @@ class Product extends Model
 
     protected $fillable = [
         'category_id',
+        'subcategory_id',
         'name',
         'slug',
         'description',
         'short_description',
+        'tag_line',
         'price',
         'sale_price',
         'sku',
@@ -22,24 +24,32 @@ class Product extends Model
         'stock_status',
         'weight',
         'dimensions',
+        'print_length_inches',  // Print dimension length in inches
+        'print_width_inches',   // Print dimension width in inches
         'attributes', // ✅ JSON column for category-specific attributes
         'featured_image',
         'is_featured',
+        'is_new',
+        'new_until_days',
         'is_active',
         'views',
         'rating',
         'reviews_count'
     ];
 
-protected $casts = [
-    'price' => 'decimal:2',
-    'sale_price' => 'decimal:2',
-    'weight' => 'decimal:2',
-    'rating' => 'decimal:1',
-    'attributes' => 'array',
-    'is_featured' => 'boolean',
-    'is_active' => 'boolean'
-];
+    protected $casts = [
+        'price' => 'decimal:2',
+        'sale_price' => 'decimal:2',
+        'weight' => 'decimal:2',
+        'print_length_inches' => 'decimal:2',
+        'print_width_inches' => 'decimal:2',
+        'rating' => 'decimal:1',
+        'attributes' => 'array',
+        'is_featured' => 'boolean',
+        'is_new' => 'boolean',
+        'is_active' => 'boolean',
+        'new_until_days' => 'integer',
+    ];
 
 
     protected $appends = [
@@ -63,11 +73,42 @@ protected $casts = [
     }
 
     /**
+     * Get the subcategory that owns the product
+     */
+    public function subcategory()
+    {
+        return $this->belongsTo(Subcategory::class);
+    }
+
+    /**
      * Get all images for the product
      */
     public function images()
     {
         return $this->hasMany(ProductImage::class)->orderBy('sort_order');
+    }
+
+    /**
+     * Check if product should show NEW badge
+     * Returns true if: manually marked as new OR created within new_until_days (default 30)
+     */
+    public function getShowNewBadgeAttribute()
+    {
+        // If manually marked as new
+        if ($this->is_new) {
+            return true;
+        }
+
+        // Auto-new based on creation date
+        $daysThreshold = $this->new_until_days ?? 30;
+        $createdAt = $this->created_at;
+
+        if ($createdAt) {
+            $daysSinceCreation = $createdAt->diffInDays(now());
+            return $daysSinceCreation <= $daysThreshold;
+        }
+
+        return false;
     }
 
     /*

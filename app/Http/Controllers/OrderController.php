@@ -7,8 +7,10 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\Cart;
 use App\Models\Complaint;
+use App\Models\UserDesign;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class OrderController extends Controller
@@ -20,7 +22,7 @@ class OrderController extends Controller
     {
         try {
             $orders = $request->user()->orders()
-                ->with(['orderItems.product'])
+                ->with(['orderItems.product', 'orderItems.design'])
                 ->orderBy('created_at', 'desc')
                 ->get();
 
@@ -46,6 +48,8 @@ class OrderController extends Controller
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
             'items.*.quantity' => 'required|integer|min:1',
+            'items.*.design_id' => 'nullable|exists:user_designs,id',
+            'items.*.selected_attributes' => 'nullable|array',
             'shipping_address' => 'required|string',
             'shipping_city' => 'required|string',
             'shipping_state' => 'required|string',
@@ -81,7 +85,9 @@ class OrderController extends Controller
                     'product' => $product,
                     'quantity' => $item['quantity'],
                     'price' => $price,
-                    'subtotal' => $itemSubtotal
+                    'subtotal' => $itemSubtotal,
+                    'design_id' => $item['design_id'] ?? null,
+                    'selected_attributes' => $item['selected_attributes'] ?? null,
                 ];
             }
 
@@ -117,14 +123,39 @@ class OrderController extends Controller
 
             // Create order items and reduce stock
             foreach ($orderItems as $item) {
+                $designId = $item['design_id'] ?? null;
+                $designFrontImage = null;
+                $designBackImage = null;
+                $selectedAttributes = $item['selected_attributes'] ?? null;
+
+                // If there's a design, copy the design images to order for historical record
+                if ($designId) {
+                    $design = UserDesign::find($designId);
+                    if ($design && $design->user_id === $request->user()->id) {
+                        // Use thumbnail paths for order display (lighter storage)
+                        $designFrontImage = $design->front_thumbnail_path;
+                        $designBackImage = $design->back_thumbnail_path;
+
+                        // Mark design as ordered
+                        $design->update([
+                            'status' => 'ordered',
+                            'order_id' => $order->id,
+                            'ordered_at' => now(),
+                        ]);
+                    }
+                }
+
                 OrderItem::create([
                     'order_id' => $order->id,
                     'product_id' => $item['product']->id,
+                    'design_id' => $designId,
                     'product_name' => $item['product']->name,
                     'price' => $item['price'],
                     'quantity' => $item['quantity'],
                     'subtotal' => $item['subtotal'],
-                    'product_attributes' => null, // Can add customization later
+                    'product_attributes' => $selectedAttributes,
+                    'design_front_image' => $designFrontImage,
+                    'design_back_image' => $designBackImage,
                 ]);
 
                 // Reduce stock
