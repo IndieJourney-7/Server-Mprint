@@ -47,4 +47,20 @@ class User extends Authenticatable
     {
         return $this->hasMany(Complaint::class);
     }
+
+    public function favoriteTemplates()
+    {
+        return $this->belongsToMany(Template::class, 'user_favorite_templates')
+            ->withTimestamps();
+    }
+
+    public function designs()
+    {
+        return $this->hasMany(UserDesign::class);
+    }
+
+    public function uploads()
+    {
+        return $this->hasMany(UserUpload::class);
+    }
 }

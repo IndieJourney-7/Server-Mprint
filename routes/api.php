@@ -18,6 +18,8 @@ use App\Http\Controllers\OrderController;
 use App\Http\Controllers\Api\DesignController;
 use App\Http\Controllers\Api\UserUploadController;
 use App\Http\Controllers\Api\WorkSessionController;
+use App\Http\Controllers\Api\TemplateController;
+use App\Http\Controllers\Api\AdminTemplateController;
 
 Route::get('/health', fn() => response()->json([
   'success' => true,
@@ -46,6 +48,20 @@ Route::prefix('products')->group(function () {
   Route::delete('/{id}', [ProductController::class, 'destroy']);
   Route::post('/{id}/increment-views', [ProductController::class, 'incrementViews']);
   Route::get('/{slug}/related', [ProductController::class, 'relatedProducts']);
+});
+
+// Public: templates (browse designs)
+Route::prefix('templates')->group(function () {
+  Route::get('/', [TemplateController::class, 'index']); // List all templates with filters
+  Route::get('/{id}', [TemplateController::class, 'show']); // Get single template
+  Route::post('/{id}/use', [TemplateController::class, 'useTemplate']); // Use template (increment usage)
+  Route::get('/{templateId}/variants/{variantId}', [TemplateController::class, 'getColorVariant']); // Get color variant
+
+  // Protected routes - require authentication
+  Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/{id}/favorite', [TemplateController::class, 'toggleFavorite']); // Toggle favorite
+    Route::get('/favorites/list', [TemplateController::class, 'getFavorites']); // Get user favorites
+  });
 });
 
 // Public: banners & offer bars
@@ -217,6 +233,19 @@ Route::middleware('auth:sanctum')->group(function () {
       Route::put('/{id}', [PolicyController::class, 'update']);
       Route::delete('/{id}', [PolicyController::class, 'destroy']);
       Route::post('/{id}/toggle-active', [PolicyController::class, 'toggleActive']);
+    });
+
+    // Template management
+    Route::prefix('templates')->group(function () {
+      Route::get('/', [AdminTemplateController::class, 'index']);
+      Route::post('/', [AdminTemplateController::class, 'store']);
+      Route::put('/{id}', [AdminTemplateController::class, 'update']);
+      Route::delete('/{id}', [AdminTemplateController::class, 'destroy']);
+
+      // Color variant management
+      Route::post('/{templateId}/variants', [AdminTemplateController::class, 'addColorVariant']);
+      Route::put('/{templateId}/variants/{variantId}', [AdminTemplateController::class, 'updateColorVariant']);
+      Route::delete('/{templateId}/variants/{variantId}', [AdminTemplateController::class, 'deleteColorVariant']);
     });
   });
 });
