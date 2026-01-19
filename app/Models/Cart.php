@@ -52,8 +52,13 @@ class Cart extends Model
     {
         // First check if there's a linked design
         if ($this->design_id && $this->design) {
-            // Use original URL which contains the complete card preview (with white margins)
-            // NOT thumbnail_url which is cropped to 400x250
+            // PRIORITY ORDER for Cart display:
+            // 1. front_preview_url - Final preview WITH text layers baked in (saved during finalize)
+            // 2. front_original_url - Raw uploaded image (fallback if no preview)
+            // This ensures text edits are visible in the Cart
+            if ($this->design->front_preview_url) {
+                return $this->design->front_preview_url;
+            }
             return $this->design->front_original_url;
         }
         // Fallback to direct path
@@ -64,8 +69,13 @@ class Cart extends Model
     {
         // First check if there's a linked design
         if ($this->design_id && $this->design) {
-            // Use original URL which contains the complete card preview (with white margins)
-            // NOT thumbnail_url which is cropped to 400x250
+            // PRIORITY ORDER for Cart display:
+            // 1. back_preview_url - Final preview WITH text layers baked in (saved during finalize)
+            // 2. back_original_url - Raw uploaded image (fallback if no preview)
+            // This ensures text edits are visible in the Cart
+            if ($this->design->back_preview_url) {
+                return $this->design->back_preview_url;
+            }
             return $this->design->back_original_url;
         }
         // Fallback to direct path

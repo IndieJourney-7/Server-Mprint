@@ -22,14 +22,21 @@ class UserDesign extends Model
         'front_thumbnail_path',
         'front_position_data',
         'front_canvas_state',
+        'front_text_layers',      // Text layers for front side (JSON)
+        'front_preview_path',     // Preview image with text rendered (for Cart display)
         'back_original_path',
         'back_thumbnail_path',
         'back_position_data',
         'back_canvas_state',
+        'back_text_layers',       // Text layers for back side (JSON)
+        'back_preview_path',      // Preview image with text rendered (for Cart display)
         'front_final_path',
         'back_final_path',
         'orientation',
         'status',
+        'design_type',            // 'uploaded', 'customized', 'blank'
+        'template_id',            // Template ID if customized from template
+        'color_variant_id',       // Color variant ID if using template color variant
         'order_id',
         'ordered_at',
     ];
@@ -39,6 +46,8 @@ class UserDesign extends Model
         'back_position_data' => 'array',
         'front_canvas_state' => 'array',
         'back_canvas_state' => 'array',
+        'front_text_layers' => 'array',
+        'back_text_layers' => 'array',
         'ordered_at' => 'datetime',
     ];
 
@@ -66,6 +75,16 @@ class UserDesign extends Model
     public function orderItems()
     {
         return $this->hasMany(OrderItem::class, 'design_id');
+    }
+
+    public function template()
+    {
+        return $this->belongsTo(Template::class);
+    }
+
+    public function colorVariant()
+    {
+        return $this->belongsTo(TemplateColorVariant::class, 'color_variant_id');
     }
 
     // Accessors for full URLs
@@ -110,15 +129,30 @@ class UserDesign extends Model
         return Storage::disk('public')->url($this->back_final_path);
     }
 
+    // Preview URLs (with text layers baked in - used for Cart display)
+    public function getFrontPreviewUrlAttribute()
+    {
+        if (!$this->front_preview_path) return null;
+        // Use API route for CORS support
+        return url('/api/storage/' . $this->front_preview_path);
+    }
+
+    public function getBackPreviewUrlAttribute()
+    {
+        if (!$this->back_preview_path) return null;
+        // Use API route for CORS support
+        return url('/api/storage/' . $this->back_preview_path);
+    }
+
     // Helper to check if design has content
     public function getHasFrontDesignAttribute()
     {
-        return !empty($this->front_original_path);
+        return !empty($this->front_original_path) || !empty($this->front_preview_path) || !empty($this->front_text_layers);
     }
 
     public function getHasBackDesignAttribute()
     {
-        return !empty($this->back_original_path);
+        return !empty($this->back_original_path) || !empty($this->back_preview_path) || !empty($this->back_text_layers);
     }
 
     public function getHasAnyDesignAttribute()
@@ -139,6 +173,9 @@ class UserDesign extends Model
             if ($design->front_thumbnail_path) {
                 Storage::disk('public')->delete($design->front_thumbnail_path);
             }
+            if ($design->front_preview_path) {
+                Storage::disk('public')->delete($design->front_preview_path);
+            }
 
             // Delete back design files
             if ($design->back_original_path) {
@@ -146,6 +183,9 @@ class UserDesign extends Model
             }
             if ($design->back_thumbnail_path) {
                 Storage::disk('public')->delete($design->back_thumbnail_path);
+            }
+            if ($design->back_preview_path) {
+                Storage::disk('public')->delete($design->back_preview_path);
             }
 
             // Delete final images
@@ -162,8 +202,10 @@ class UserDesign extends Model
     protected $appends = [
         'front_original_url',
         'front_thumbnail_url',
+        'front_preview_url',
         'back_original_url',
         'back_thumbnail_url',
+        'back_preview_url',
         'front_final_url',
         'back_final_url',
         'has_front_design',

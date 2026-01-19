@@ -250,17 +250,38 @@ Route::middleware('auth:sanctum')->group(function () {
   });
 });
 
-// Serve storage files with CORS headers
+// Serve storage files with CORS headers for canvas export
 Route::get('/storage/{path}', function ($path) {
     $filePath = storage_path('app/public/' . $path);
-    
+
     if (!file_exists($filePath)) {
         return response()->json(['error' => 'File not found'], 404);
     }
-    
+
     $mimeType = mime_content_type($filePath);
+
+    // Get the request origin for CORS
+    $origin = request()->header('Origin', 'http://localhost:3000');
+
     return response()->file($filePath, [
         'Content-Type' => $mimeType,
-        'Access-Control-Allow-Origin' => '*',
+        // Use specific origin for CORS with credentials support
+        'Access-Control-Allow-Origin' => $origin,
+        'Access-Control-Allow-Credentials' => 'true',
+        // Required for canvas.toDataURL() to work with images loaded with crossOrigin='anonymous'
+        'Cross-Origin-Resource-Policy' => 'cross-origin',
+    ]);
+})->where('path', '.*');
+
+// Handle OPTIONS preflight for storage files
+Route::options('/storage/{path}', function ($path) {
+    $origin = request()->header('Origin', 'http://localhost:3000');
+
+    return response('', 200, [
+        'Access-Control-Allow-Origin' => $origin,
+        'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+        'Access-Control-Allow-Headers' => 'Origin, Content-Type, Accept, Authorization',
+        'Access-Control-Allow-Credentials' => 'true',
+        'Access-Control-Max-Age' => '86400',
     ]);
 })->where('path', '.*');

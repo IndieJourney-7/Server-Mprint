@@ -30,7 +30,7 @@ class CartController extends Controller
         try {
             $userId = auth()->id();
 
-            $items = Cart::with(['product.category','product.images', 'design'])
+            $items = Cart::with(['product.category','product.images', 'design.template'])
                 ->where('user_id', $userId)
                 ->orderByDesc('id')
                 ->get()
@@ -56,6 +56,10 @@ class CartController extends Controller
                 // Include original high-res URLs if design exists
                 'front_original_url' => $item->design?->front_original_url,
                 'back_original_url' => $item->design?->back_original_url,
+                // Design type info - helps Cart render correctly
+                'design_type' => $item->design?->design_type ?? 'blank',
+                'template_id' => $item->design?->template_id,
+                'template_name' => $item->design?->template?->name,
                 'unit_price' => $item->unit_price,
                 'total_price' => $item->total_price,
             ]);
@@ -75,6 +79,14 @@ class CartController extends Controller
     // POST /api/cart/add (auth required)
     public function addToCart(Request $request)
     {
+        Log::info('[CartController] addToCart called with:', [
+            'product_id' => $request->input('product_id'),
+            'quantity' => $request->input('quantity'),
+            'design_id' => $request->input('design_id'),
+            'has_design_id' => $request->has('design_id'),
+            'all_input' => $request->all(),
+        ]);
+
         $validator = Validator::make($request->all(), [
             'product_id' => 'required|exists:products,id',
             'quantity' => 'required|integer|min:1',
@@ -82,6 +94,7 @@ class CartController extends Controller
             'design_id' => 'nullable|exists:user_designs,id'
         ]);
         if ($validator->fails()) {
+            Log::warning('[CartController] Validation failed:', $validator->errors()->toArray());
             return response()->json(['success' => false, 'message' => 'Validation failed', 'errors' => $validator->errors()], 422);
         }
 
@@ -101,8 +114,20 @@ class CartController extends Controller
                     ->where('user_id', $userId)
                     ->first();
                 if (!$design) {
+                    Log::warning('[CartController] Design not found or does not belong to user', [
+                        'design_id' => $designId,
+                        'user_id' => $userId,
+                    ]);
                     $designId = null; // Invalid design, ignore it
+                } else {
+                    Log::info('[CartController] Design validated successfully', [
+                        'design_id' => $designId,
+                        'design_has_front_preview' => !empty($design->front_preview_path),
+                        'design_has_back_preview' => !empty($design->back_preview_path),
+                    ]);
                 }
+            } else {
+                Log::info('[CartController] No design_id provided in request');
             }
 
             $existing = Cart::where('user_id', $userId)
@@ -143,11 +168,13 @@ class CartController extends Controller
     }
 
     // PUT /api/cart/update/{id} (auth required)
+    // Now also supports updating design_id for Edit Design from Cart flow
     public function updateQuantity(Request $request, $cartId)
     {
         $validator = Validator::make($request->all(), [
             'quantity' => 'required|integer|min:1',
-            'selected_attributes' => 'nullable|array'
+            'selected_attributes' => 'nullable|array',
+            'design_id' => 'nullable|exists:user_designs,id',
         ]);
         if ($validator->fails()) {
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
@@ -156,12 +183,30 @@ class CartController extends Controller
         try {
             $userId = auth()->id();
             $cart = Cart::with('product')->where('user_id', $userId)->findOrFail($cartId);
-            
+
             $newQuantity = (int) $request->quantity;
-            
+
             // Update quantity
             $cart->quantity = $newQuantity;
-            
+
+            // Update design_id if provided (for Edit Design from Cart flow)
+            if ($request->has('design_id')) {
+                $designId = $request->input('design_id');
+                // Verify design belongs to user
+                if ($designId) {
+                    $design = \App\Models\UserDesign::where('id', $designId)
+                        ->where('user_id', $userId)
+                        ->first();
+                    if ($design) {
+                        $cart->design_id = $designId;
+                        Log::info('[updateQuantity] Design ID updated', [
+                            'cart_id' => $cartId,
+                            'design_id' => $designId,
+                        ]);
+                    }
+                }
+            }
+
             // Update selected_attributes if provided
             if ($request->has('selected_attributes')) {
                 $attrs = $this->normalizeAttributes($request->input('selected_attributes', []));

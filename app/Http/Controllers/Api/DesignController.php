@@ -67,6 +67,11 @@ class DesignController extends Controller
 
     /**
      * Create a new design (initial creation when entering design studio)
+     *
+     * Design Types:
+     * - 'uploaded': User uploads their own design file
+     * - 'customized': User customizes a template (Browse Design)
+     * - 'blank': User creates design from scratch (no template)
      */
     public function store(Request $request)
     {
@@ -82,6 +87,10 @@ class DesignController extends Controller
                 'selected_shape' => 'nullable|string|max:255',
                 'selected_finishing' => 'nullable|string|max:255',
                 'session_id' => 'nullable|string|max:255',
+                // Design type fields
+                'design_type' => 'nullable|in:uploaded,customized,blank',
+                'template_id' => 'nullable|exists:templates,id',
+                'color_variant_id' => 'nullable|exists:template_color_variants,id',
             ]);
 
             $product = Product::find($request->product_id);
@@ -96,6 +105,16 @@ class DesignController extends Controller
                 'name' => $request->name ?? $product->name . ' Design',
                 'orientation' => $request->orientation ?? 'horizontal',
                 'status' => 'draft',
+                // Design type fields - helps distinguish Browse Design vs Upload Design
+                'design_type' => $request->design_type ?? 'blank',
+                'template_id' => $request->template_id,
+                'color_variant_id' => $request->color_variant_id,
+            ]);
+
+            Log::info('Design created:', [
+                'design_id' => $design->id,
+                'design_type' => $design->design_type,
+                'template_id' => $design->template_id,
             ]);
 
             return response()->json([
@@ -178,6 +197,12 @@ class DesignController extends Controller
                 }
             }
 
+            // If design_type is still 'blank' and no template, mark as 'uploaded'
+            // This distinguishes "Upload Design" from "Browse Design" flows
+            if ($design->design_type === 'blank' && !$design->template_id) {
+                $updateData['design_type'] = 'uploaded';
+            }
+
             $design->update($updateData);
             $design->refresh();
 
@@ -247,6 +272,8 @@ class DesignController extends Controller
 
     /**
      * Finalize design (mark as completed)
+     * CRITICAL: This now accepts preview images with text layers rendered
+     * These previews are what gets displayed in the Cart page
      */
     public function finalize(Request $request, $id)
     {
@@ -255,21 +282,105 @@ class DesignController extends Controller
 
             $design = UserDesign::where('user_id', $user->id)->findOrFail($id);
 
-            // Check if at least one side has a design
-            if (!$design->has_any_design) {
+            $request->validate([
+                'name' => 'nullable|string|max:255',
+                'front_preview' => 'nullable|string', // Base64 data URL
+                'back_preview' => 'nullable|string',  // Base64 data URL
+                'front_text_layers' => 'nullable|array',
+                'back_text_layers' => 'nullable|array',
+                'orientation' => 'nullable|string|in:horizontal,vertical',
+                'shape' => 'nullable|string|in:rectangle,rounded',
+            ]);
+
+            // Check if we have preview data or existing design
+            $hasFrontPreview = $request->filled('front_preview');
+            $hasBackPreview = $request->filled('back_preview');
+            $hasExistingDesign = $design->has_any_design;
+
+            Log::info('Design finalize request received:', [
+                'design_id' => $id,
+                'has_front_preview' => $hasFrontPreview,
+                'has_back_preview' => $hasBackPreview,
+                'has_existing_design' => $hasExistingDesign,
+                'front_preview_length' => $hasFrontPreview ? strlen($request->front_preview) : 0,
+                'back_preview_length' => $hasBackPreview ? strlen($request->back_preview) : 0,
+                'front_preview_is_data_url' => $hasFrontPreview ? str_starts_with($request->front_preview, 'data:') : false,
+                'back_preview_is_data_url' => $hasBackPreview ? str_starts_with($request->back_preview, 'data:') : false,
+            ]);
+
+            if (!$hasFrontPreview && !$hasBackPreview && !$hasExistingDesign) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Please upload at least one design before finalizing',
                 ], 400);
             }
 
-            $request->validate([
-                'name' => 'nullable|string|max:255',
-            ]);
-
-            $design->update([
+            $updateData = [
                 'status' => 'completed',
                 'name' => $request->name ?? $design->name,
+            ];
+
+            // Save orientation and shape if provided
+            if ($request->filled('orientation')) {
+                $updateData['orientation'] = $request->orientation;
+            }
+            if ($request->filled('shape')) {
+                $updateData['selected_shape'] = $request->shape;
+            }
+
+            // Save text layers as JSON for future editing
+            if ($request->has('front_text_layers')) {
+                $updateData['front_text_layers'] = $request->front_text_layers;
+                Log::info('[finalize] Saving front_text_layers:', [
+                    'count' => is_array($request->front_text_layers) ? count($request->front_text_layers) : 0,
+                    'data' => $request->front_text_layers,
+                ]);
+            }
+            if ($request->has('back_text_layers')) {
+                $updateData['back_text_layers'] = $request->back_text_layers;
+                Log::info('[finalize] Saving back_text_layers:', [
+                    'count' => is_array($request->back_text_layers) ? count($request->back_text_layers) : 0,
+                    'data' => $request->back_text_layers,
+                ]);
+            }
+
+            $directory = 'designs/' . $user->id;
+
+            // CRITICAL: Save the preview images (with text layers baked in)
+            // These are what get displayed in the Cart page
+            if ($hasFrontPreview) {
+                $frontPath = $this->saveBase64Image($request->front_preview, $directory, 'front_preview');
+                if ($frontPath) {
+                    // Delete old preview if exists
+                    if ($design->front_preview_path) {
+                        Storage::disk('public')->delete($design->front_preview_path);
+                    }
+                    $updateData['front_preview_path'] = $frontPath;
+                    Log::info('Saved front preview to: ' . $frontPath);
+                }
+            }
+
+            if ($hasBackPreview) {
+                $backPath = $this->saveBase64Image($request->back_preview, $directory, 'back_preview');
+                if ($backPath) {
+                    // Delete old preview if exists
+                    if ($design->back_preview_path) {
+                        Storage::disk('public')->delete($design->back_preview_path);
+                    }
+                    $updateData['back_preview_path'] = $backPath;
+                    Log::info('Saved back preview to: ' . $backPath);
+                }
+            }
+
+            $design->update($updateData);
+            $design->refresh();
+
+            Log::info('Design finalized:', [
+                'design_id' => $design->id,
+                'has_front_preview' => !!$design->front_preview_path,
+                'has_back_preview' => !!$design->back_preview_path,
+                'front_preview_url' => $design->front_preview_url,
+                'back_preview_url' => $design->back_preview_url,
             ]);
 
             return response()->json([
@@ -279,10 +390,67 @@ class DesignController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::error('Error finalizing design: ' . $e->getMessage());
+            Log::error($e->getTraceAsString());
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to finalize design',
+                'message' => 'Failed to finalize design: ' . $e->getMessage(),
             ], 500);
+        }
+    }
+
+    /**
+     * Save base64 encoded image to storage
+     * @param string $base64Data Base64 data URL (data:image/png;base64,...)
+     * @param string $directory Target directory
+     * @param string $prefix Filename prefix
+     * @return string|null Stored file path or null on failure
+     */
+    private function saveBase64Image($base64Data, $directory, $prefix)
+    {
+        try {
+            Log::info('saveBase64Image called for ' . $prefix, [
+                'data_length' => strlen($base64Data),
+                'data_start' => substr($base64Data, 0, 50),
+                'is_data_url' => str_starts_with($base64Data, 'data:'),
+            ]);
+
+            // Check if it's a base64 data URL
+            if (!preg_match('/^data:image\/(\w+);base64,/', $base64Data, $matches)) {
+                Log::warning('Invalid base64 image format for ' . $prefix . '. Data starts with: ' . substr($base64Data, 0, 100));
+                return null;
+            }
+
+            $extension = $matches[1];
+            if ($extension === 'jpeg') {
+                $extension = 'jpg';
+            }
+
+            // Remove the data URL prefix
+            $imageData = preg_replace('/^data:image\/\w+;base64,/', '', $base64Data);
+            $imageData = base64_decode($imageData);
+
+            if ($imageData === false) {
+                Log::error('Failed to decode base64 image for ' . $prefix);
+                return null;
+            }
+
+            // Generate unique filename
+            $filename = Str::uuid() . '_' . $prefix . '.' . $extension;
+            $previewDir = $directory . '/previews';
+            $fullPath = $previewDir . '/' . $filename;
+
+            // Ensure directory exists
+            Storage::disk('public')->makeDirectory($previewDir);
+
+            // Save the file
+            Storage::disk('public')->put($fullPath, $imageData);
+
+            Log::info('Saved base64 image: ' . $fullPath . ' (' . strlen($imageData) . ' bytes)');
+
+            return $fullPath;
+        } catch (\Exception $e) {
+            Log::error('Error saving base64 image: ' . $e->getMessage());
+            return null;
         }
     }
 
@@ -541,18 +709,28 @@ class DesignController extends Controller
             $request->validate([
                 'front_canvas_state' => 'nullable|array',
                 'back_canvas_state' => 'nullable|array',
+                'front_text_layers' => 'nullable|array',
+                'back_text_layers' => 'nullable|array',
                 'front_image' => 'nullable|file|mimes:jpeg,jpg,png,webp|max:25600',
                 'back_image' => 'nullable|file|mimes:jpeg,jpg,png,webp|max:25600',
             ]);
 
             $updateData = [];
 
-            // Save canvas states
+            // Save canvas states (image position, size, rotation)
             if ($request->has('front_canvas_state')) {
                 $updateData['front_canvas_state'] = $request->front_canvas_state;
             }
             if ($request->has('back_canvas_state')) {
                 $updateData['back_canvas_state'] = $request->back_canvas_state;
+            }
+
+            // Save text layers (text content, formatting, position)
+            if ($request->has('front_text_layers')) {
+                $updateData['front_text_layers'] = $request->front_text_layers;
+            }
+            if ($request->has('back_text_layers')) {
+                $updateData['back_text_layers'] = $request->back_text_layers;
             }
 
             // Handle image uploads if provided
@@ -633,6 +811,12 @@ class DesignController extends Controller
 
     /**
      * Get design with full canvas state for editing
+     * Returns ALL data needed to fully restore the design in CanvasDesignStudio:
+     * - Canvas state (position, size, rotation)
+     * - Image URLs (original images)
+     * - Text layers (all text with formatting)
+     * - Template data (if design was customized from a template)
+     * - Design metadata (orientation, shape, type)
      */
     public function getForEditing($id)
     {
@@ -640,17 +824,76 @@ class DesignController extends Controller
             $user = Auth::user();
 
             $design = UserDesign::where('user_id', $user->id)
-                ->with('product:id,name,slug')
+                ->with(['product:id,name,slug', 'template', 'colorVariant'])
                 ->findOrFail($id);
+
+            // IMPORTANT: For template-based designs, the image is stored in preview_path, not original_path
+            // We need to use the preview URL as fallback when original URL is not available
+            $frontImageUrl = $design->front_original_url ?? $design->front_preview_url;
+            $backImageUrl = $design->back_original_url ?? $design->back_preview_url;
+
+            Log::info('[getForEditing] Fetching design for editing:', [
+                'design_id' => $id,
+                'has_front_canvas_state' => !empty($design->front_canvas_state),
+                'has_back_canvas_state' => !empty($design->back_canvas_state),
+                'has_front_original' => !empty($design->front_original_path),
+                'has_back_original' => !empty($design->back_original_path),
+                'has_front_preview' => !empty($design->front_preview_path),
+                'has_back_preview' => !empty($design->back_preview_path),
+                'front_image_url' => $frontImageUrl ? 'present' : 'null',
+                'back_image_url' => $backImageUrl ? 'present' : 'null',
+                'has_front_text_layers' => !empty($design->front_text_layers),
+                'has_back_text_layers' => !empty($design->back_text_layers),
+                // Log actual text layer data for debugging
+                'front_text_layers_count' => is_array($design->front_text_layers) ? count($design->front_text_layers) : 0,
+                'back_text_layers_count' => is_array($design->back_text_layers) ? count($design->back_text_layers) : 0,
+                'front_text_layers_data' => $design->front_text_layers,
+                'back_text_layers_data' => $design->back_text_layers,
+                'design_type' => $design->design_type,
+                'template_id' => $design->template_id,
+            ]);
+
+            // Build template data if design was customized from a template
+            $templateData = null;
+            if ($design->template_id && $design->template) {
+                $templateData = [
+                    'template' => [
+                        'id' => $design->template->id,
+                        'name' => $design->template->name,
+                        'preview_url' => $design->template->preview_url,
+                        'front_template_url' => $design->template->front_template_url,
+                        'back_template_url' => $design->template->back_template_url,
+                    ],
+                    'colorVariant' => $design->colorVariant ? [
+                        'id' => $design->colorVariant->id,
+                        'name' => $design->colorVariant->name,
+                        'preview_url' => $design->colorVariant->preview_url,
+                        'front_template_url' => $design->colorVariant->front_template_url,
+                        'back_template_url' => $design->colorVariant->back_template_url,
+                    ] : null,
+                ];
+            }
 
             return response()->json([
                 'success' => true,
                 'data' => [
                     'design' => $design,
+                    // Canvas state for restoring exact image position/size
                     'front_canvas_state' => $design->front_canvas_state,
                     'back_canvas_state' => $design->back_canvas_state,
-                    'front_image_url' => $design->front_original_url,
-                    'back_image_url' => $design->back_original_url,
+                    // Image URLs - use original for editing (high quality), fallback to preview
+                    // CRITICAL: Template-based designs store image in preview_path, not original_path
+                    'front_image_url' => $frontImageUrl,
+                    'back_image_url' => $backImageUrl,
+                    // Text layers for restoring all text with formatting
+                    'front_text_layers' => $design->front_text_layers ?? [],
+                    'back_text_layers' => $design->back_text_layers ?? [],
+                    // Template data for restoring template-based designs
+                    'template_data' => $templateData,
+                    // Design metadata
+                    'design_type' => $design->design_type,
+                    'orientation' => $design->orientation,
+                    'selected_shape' => $design->selected_shape,
                 ],
             ]);
         } catch (\Exception $e) {

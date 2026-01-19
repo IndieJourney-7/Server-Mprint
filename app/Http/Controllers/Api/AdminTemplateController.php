@@ -52,6 +52,12 @@ class AdminTemplateController extends Controller
     public function store(Request $request)
     {
         try {
+            // Convert string boolean values to actual booleans for validation
+            $request->merge([
+                'is_active' => filter_var($request->input('is_active', true), FILTER_VALIDATE_BOOLEAN),
+                'is_featured' => filter_var($request->input('is_featured', false), FILTER_VALIDATE_BOOLEAN),
+            ]);
+
             $validated = $request->validate([
                 'name' => 'required|string|max:255',
                 'description' => 'nullable|string',
@@ -113,6 +119,14 @@ class AdminTemplateController extends Controller
     {
         try {
             $template = Template::findOrFail($id);
+
+            // Convert string boolean values to actual booleans for validation
+            if ($request->has('is_active')) {
+                $request->merge(['is_active' => filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN)]);
+            }
+            if ($request->has('is_featured')) {
+                $request->merge(['is_featured' => filter_var($request->input('is_featured'), FILTER_VALIDATE_BOOLEAN)]);
+            }
 
             $validated = $request->validate([
                 'name' => 'sometimes|string|max:255',
