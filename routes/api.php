@@ -41,6 +41,8 @@ Route::prefix('products')->group(function () {
   Route::get('/', [ProductController::class, 'index']);
   Route::get('/featured', [ProductController::class, 'featured']);
   Route::get('/new-arrivals', [ProductController::class, 'newArrivals']);
+  Route::get('/trending', [ProductController::class, 'trending']);
+  Route::get('/branded', [ProductController::class, 'branded']);
   Route::get('/category/{categorySlug}', [ProductController::class, 'byCategory']);
   Route::get('/{slug}', [ProductController::class, 'show']);
   Route::post('/', [ProductController::class, 'store']);
@@ -115,6 +117,13 @@ Route::prefix('policies')->group(function () {
 Route::prefix('auth')->group(function () {
   Route::post('/register', [AuthController::class, 'register']);
   Route::post('/login', [AuthController::class, 'login']);
+  Route::post('/admin/login', [AuthController::class, 'adminLogin']);
+});
+
+// Admin routes protected by JWT
+Route::prefix('admin')->middleware('admin.jwt')->group(function () {
+  Route::get('/verify', [AuthController::class, 'verifyAdmin']);
+  Route::post('/logout', [AuthController::class, 'adminLogout']);
 });
 
 // Protected: user + cart + favorites (login required)

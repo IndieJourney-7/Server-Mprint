@@ -188,6 +188,66 @@ class ProductController extends Controller
     }
 
     /**
+     * GET /api/products/trending
+     */
+    public function trending(Request $request): JsonResponse
+    {
+        try {
+            $perPage = (int)$request->get('per_page', 12);
+
+            $products = Product::with(['category', 'images'])
+                ->active()
+                ->where('is_trending', true)
+                ->orderBy('created_at', 'desc')
+                ->paginate($perPage);
+
+            $products->getCollection()->transform(fn($p) => $this->appendImageUrls($p));
+
+            return response()->json([
+                'success' => true,
+                'data' => $products,
+                'message' => 'Trending products fetched successfully'
+            ]);
+        } catch (\Exception $e) {
+            Log::error('trending error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Error fetching trending products.'
+            ], 500);
+        }
+    }
+
+    /**
+     * GET /api/products/branded
+     */
+    public function branded(Request $request): JsonResponse
+    {
+        try {
+            $perPage = (int)$request->get('per_page', 12);
+
+            $products = Product::with(['category', 'images'])
+                ->active()
+                ->where('is_branded', true)
+                ->orderBy('created_at', 'desc')
+                ->paginate($perPage);
+
+            $products->getCollection()->transform(fn($p) => $this->appendImageUrls($p));
+
+            return response()->json([
+                'success' => true,
+                'data' => $products,
+                'message' => 'Branded products fetched successfully'
+            ]);
+        } catch (\Exception $e) {
+            Log::error('branded error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Error fetching branded products.'
+            ], 500);
+        }
+    }
+
+    /**
      * GET /api/products/{slug}
      */
     public function show($slug): JsonResponse
@@ -266,6 +326,9 @@ class ProductController extends Controller
                 'print_width_inches' => 'nullable|numeric|min:0.1|max:50',
                 'attributes' => 'nullable',
                 'is_featured' => 'nullable|in:0,1,true,false',
+                'is_new' => 'nullable|in:0,1,true,false',
+                'is_trending' => 'nullable|in:0,1,true,false',
+                'is_branded' => 'nullable|in:0,1,true,false',
                 'is_active' => 'nullable|in:0,1,true,false',
             ], $this->imageValidationRules()),
             array_merge([
@@ -310,6 +373,9 @@ class ProductController extends Controller
                 'print_width_inches' => $request->filled('print_width_inches') ? (float)$request->print_width_inches : null,
                 'attributes' => $attributes,
                 'is_featured' => $this->toBool($request->is_featured),
+                'is_new' => $this->toBool($request->is_new),
+                'is_trending' => $this->toBool($request->is_trending),
+                'is_branded' => $this->toBool($request->is_branded),
                 'is_active' => $this->toBool($request->is_active, true),
                 'stock_status' => ((int)$request->stock_quantity > 0) ? 'in_stock' : 'out_of_stock',
             ]);
@@ -350,6 +416,9 @@ class ProductController extends Controller
                 'print_width_inches' => 'nullable|numeric|min:0.1|max:50',
                 'attributes' => 'nullable',
                 'is_featured' => 'nullable|in:0,1,true,false',
+                'is_new' => 'nullable|in:0,1,true,false',
+                'is_trending' => 'nullable|in:0,1,true,false',
+                'is_branded' => 'nullable|in:0,1,true,false',
                 'is_active' => 'nullable|in:0,1,true,false',
             ], $this->imageValidationRules()),
             $this->imageValidationMessages()
@@ -388,6 +457,9 @@ class ProductController extends Controller
                 'print_width_inches' => $request->filled('print_width_inches') ? (float)$request->print_width_inches : null,
                 'attributes' => $attributes,
                 'is_featured' => $this->toBool($request->is_featured),
+                'is_new' => $this->toBool($request->is_new),
+                'is_trending' => $this->toBool($request->is_trending),
+                'is_branded' => $this->toBool($request->is_branded),
                 'is_active' => $this->toBool($request->is_active, true),
                 'stock_status' => ((int)$request->stock_quantity > 0) ? 'in_stock' : 'out_of_stock',
             ]);

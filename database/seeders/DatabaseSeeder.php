@@ -10,6 +10,7 @@ class DatabaseSeeder extends Seeder
     {
         // Make sure categories are seeded first
         $this->call([
+            AdminSeeder::class,
             CategorySeeder::class,
             ProductSeeder::class,
             ProductImageSeeder::class,

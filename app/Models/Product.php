@@ -30,6 +30,8 @@ class Product extends Model
         'featured_image',
         'is_featured',
         'is_new',
+        'is_trending',
+        'is_branded',
         'new_until_days',
         'is_active',
         'views',
@@ -47,6 +49,8 @@ class Product extends Model
         'attributes' => 'array',
         'is_featured' => 'boolean',
         'is_new' => 'boolean',
+        'is_trending' => 'boolean',
+        'is_branded' => 'boolean',
         'is_active' => 'boolean',
         'new_until_days' => 'integer',
     ];
